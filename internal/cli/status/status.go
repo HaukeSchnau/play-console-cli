@@ -2,14 +2,17 @@ package status
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 	"google.golang.org/api/androidpublisher/v3"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/playdeveloperreporting/v1beta1"
 
 	"github.com/tamtom/play-console-cli/internal/cli/shared"
@@ -325,10 +328,15 @@ func fetchVitalsSnapshot(ctx context.Context, svc *reportingclient.Service, pkg 
 		timeline: window.timelineSpec(),
 		request:  "rendering",
 	})
-	if err != nil {
+	switch {
+	case isForbidden(err):
+		// Play serves slow rendering metrics only for games and answers 403 for
+		// other apps. Startup already succeeded, so this is not missing access.
+	case err != nil:
 		return nil, err
+	default:
+		snapshot.Rendering = rendering
 	}
-	snapshot.Rendering = rendering
 
 	wakeup, err := queryMetricSet(reqCtx, svc.API.Vitals.Excessivewakeuprate, metricQuerySpec{
 		name:     metricSetName(pkg, "excessiveWakeupRateMetricSet"),
@@ -362,6 +370,11 @@ type metricQuerySpec struct {
 	dimensions []string
 	timeline   *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec
 	request    string
+}
+
+func isForbidden(err error) bool {
+	var apiErr *googleapi.Error
+	return errors.As(err, &apiErr) && apiErr.Code == http.StatusForbidden
 }
 
 var startupMetrics = []string{

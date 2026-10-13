@@ -171,6 +171,56 @@ func TestBuildStatusReport_Success(t *testing.T) {
 	}
 }
 
+func TestBuildStatusReport_SkipsRenderingForNonGames(t *testing.T) {
+	originalPlayFactory := newPlayService
+	originalReportingFactory := newReportingService
+	originalNow := nowFunc
+	t.Cleanup(func() {
+		newPlayService = originalPlayFactory
+		newReportingService = originalReportingFactory
+		nowFunc = originalNow
+	})
+
+	newPlayService = func(context.Context) (*playclient.Service, error) {
+		return nil, fmt.Errorf("play unavailable")
+	}
+	reportingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/slowStartRateMetricSet"):
+			writeFreshness(t, w, 2026, 4, 2)
+		case strings.HasSuffix(r.URL.Path, "/slowRenderingRateMetricSet:query"):
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"error":{"code":403,"message":"slowRenderingRateMetricSet resource is only accessible to games","status":"PERMISSION_DENIED"}}`)
+		case strings.HasSuffix(r.URL.Path, ":query"):
+			writeJSON(t, w, map[string]any{"rows": []any{}})
+		default:
+			t.Fatalf("unexpected reporting request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(reportingServer.Close)
+	newReportingService = func(context.Context) (*reportingclient.Service, error) {
+		api, err := playdeveloperreporting.NewService(context.Background(), option.WithHTTPClient(reportingServer.Client()))
+		if err != nil {
+			return nil, err
+		}
+		api.BasePath = reportingServer.URL + "/"
+		return &reportingclient.Service{API: api, Cfg: &config.Config{}}, nil
+	}
+	nowFunc = func() time.Time { return time.Date(2026, 4, 4, 12, 0, 0, 0, time.UTC) }
+
+	report, err := buildStatusReport(context.Background(), statusOptions{packageName: "com.example.app"})
+	if err != nil {
+		t.Fatalf("buildStatusReport: %v", err)
+	}
+	if !report.Sources[1].OK {
+		t.Fatalf("expected vitals source to succeed, got %#v", report.Sources[1])
+	}
+	if report.Vitals.Rendering != nil || report.Vitals.Startup == nil || report.Vitals.Battery == nil {
+		t.Fatalf("unexpected vitals snapshot: %#v", report.Vitals)
+	}
+}
+
 func TestBuildStatusReport_PartialFailure(t *testing.T) {
 	originalPlayFactory := newPlayService
 	originalReportingFactory := newReportingService
