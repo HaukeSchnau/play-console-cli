@@ -300,7 +300,10 @@ func fetchVitalsSnapshot(ctx context.Context, svc *reportingclient.Service, pkg 
 	reqCtx, cancel := shared.ContextWithTimeout(ctx, svc.Cfg)
 	defer cancel()
 
-	window := currentWindow(now)
+	window, err := vitalsWindow(reqCtx, svc, pkg, now)
+	if err != nil {
+		return nil, err
+	}
 	snapshot := &VitalsSnapshot{Window: window}
 
 	startup, err := queryMetricSet(reqCtx, svc.API.Vitals.Slowstartrate, metricQuerySpec{
@@ -521,13 +524,39 @@ func joinVersionCodes(versionCodes []int64) string {
 	return strings.Join(parts, ",")
 }
 
-func currentWindow(now time.Time) TimeWindow {
+// vitalsWindow returns the vitalsWindowDays days that end where daily vitals data
+// ends. Daily data trails the current date by a day or two, and Play rejects
+// queries that end later. All Android vitals metric sets share this freshness, so
+// the slow start metric set stands in for the others.
+func vitalsWindow(ctx context.Context, svc *reportingclient.Service, pkg string, now time.Time) (TimeWindow, error) {
+	set, err := svc.API.Vitals.Slowstartrate.Get(metricSetName(pkg, "slowStartRateMetricSet")).Context(ctx).Do()
+	if err != nil {
+		return TimeWindow{}, fmt.Errorf("status vitals freshness query failed: %w", err)
+	}
 	end := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	if latest, ok := latestDailyEnd(set.FreshnessInfo); ok && latest.Before(end) {
+		end = latest
+	}
 	start := end.AddDate(0, 0, -vitalsWindowDays)
 	return TimeWindow{
 		Start: start.Format("2006-01-02"),
 		End:   end.Format("2006-01-02"),
+	}, nil
+}
+
+// latestDailyEnd returns the exclusive end date of the available daily data.
+func latestDailyEnd(info *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1FreshnessInfo) (time.Time, bool) {
+	if info == nil {
+		return time.Time{}, false
 	}
+	for _, freshness := range info.Freshnesses {
+		if freshness == nil || freshness.AggregationPeriod != "DAILY" || freshness.LatestEndTime == nil {
+			continue
+		}
+		end := freshness.LatestEndTime
+		return time.Date(int(end.Year), time.Month(end.Month), int(end.Day), 0, 0, 0, 0, time.UTC), true
+	}
+	return time.Time{}, false
 }
 
 func (w TimeWindow) timelineSpec() *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec {

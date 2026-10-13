@@ -64,6 +64,8 @@ func TestBuildStatusReport_Success(t *testing.T) {
 	var startupDimensions []any
 	reportingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/slowStartRateMetricSet"):
+			writeFreshness(t, w, 2026, 4, 2)
 		case strings.HasSuffix(r.URL.Path, "/slowStartRateMetricSet:query"):
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -160,8 +162,9 @@ func TestBuildStatusReport_Success(t *testing.T) {
 	if report.Vitals == nil || report.Vitals.Startup == nil || report.Vitals.Battery == nil {
 		t.Fatalf("unexpected vitals snapshot: %#v", report.Vitals)
 	}
-	if got := report.Vitals.Window.Start; got != "2026-03-28" {
-		t.Fatalf("window start = %q", got)
+	// The window ends where the daily data ends, not today.
+	if got := report.Vitals.Window; got.Start != "2026-03-26" || got.End != "2026-04-02" {
+		t.Fatalf("window = %#v", got)
 	}
 	if len(startupDimensions) != 1 || startupDimensions[0] != "startType" {
 		t.Fatalf("startup dimensions = %#v", startupDimensions)
@@ -183,6 +186,8 @@ func TestBuildStatusReport_PartialFailure(t *testing.T) {
 	}
 	reportingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/slowStartRateMetricSet"):
+			writeFreshness(t, w, 2026, 4, 2)
 		case strings.HasSuffix(r.URL.Path, "/slowStartRateMetricSet:query"),
 			strings.HasSuffix(r.URL.Path, "/slowRenderingRateMetricSet:query"),
 			strings.HasSuffix(r.URL.Path, "/excessiveWakeupRateMetricSet:query"),
@@ -362,4 +367,19 @@ func writeJSON(t *testing.T, w http.ResponseWriter, payload map[string]any) {
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		t.Fatalf("write json: %v", err)
 	}
+}
+
+// writeFreshness answers a metric set lookup whose daily data ends on the given date.
+func writeFreshness(t *testing.T, w http.ResponseWriter, year, month, day int) {
+	t.Helper()
+	writeJSON(t, w, map[string]any{
+		"freshnessInfo": map[string]any{
+			"freshnesses": []any{
+				map[string]any{
+					"aggregationPeriod": "DAILY",
+					"latestEndTime":     map[string]any{"year": year, "month": month, "day": day, "timeZone": map[string]any{"id": "America/Los_Angeles"}},
+				},
+			},
+		},
+	})
 }
