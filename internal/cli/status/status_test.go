@@ -61,9 +61,15 @@ func TestBuildStatusReport_Success(t *testing.T) {
 	}))
 	t.Cleanup(playServer.Close)
 
+	var startupDimensions []any
 	reportingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/slowStartRateMetricSet:query"):
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode startup request: %v", err)
+			}
+			startupDimensions, _ = body["dimensions"].([]any)
 			writeJSON(t, w, map[string]any{
 				"rows": []any{
 					map[string]any{
@@ -156,6 +162,9 @@ func TestBuildStatusReport_Success(t *testing.T) {
 	}
 	if got := report.Vitals.Window.Start; got != "2026-03-28" {
 		t.Fatalf("window start = %q", got)
+	}
+	if len(startupDimensions) != 1 || startupDimensions[0] != "startType" {
+		t.Fatalf("startup dimensions = %#v", startupDimensions)
 	}
 }
 

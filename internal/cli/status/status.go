@@ -304,10 +304,12 @@ func fetchVitalsSnapshot(ctx context.Context, svc *reportingclient.Service, pkg 
 	snapshot := &VitalsSnapshot{Window: window}
 
 	startup, err := queryMetricSet(reqCtx, svc.API.Vitals.Slowstartrate, metricQuerySpec{
-		name:     metricSetName(pkg, "slowStartRateMetricSet"),
-		metrics:  startupMetrics,
-		timeline: window.timelineSpec(),
-		request:  "startup",
+		name:    metricSetName(pkg, "slowStartRateMetricSet"),
+		metrics: startupMetrics,
+		// The slow start metric set rejects queries without this dimension.
+		dimensions: []string{"startType"},
+		timeline:   window.timelineSpec(),
+		request:    "startup",
 	})
 	if err != nil {
 		return nil, err
@@ -352,10 +354,11 @@ func fetchVitalsSnapshot(ctx context.Context, svc *reportingclient.Service, pkg 
 }
 
 type metricQuerySpec struct {
-	name     string
-	metrics  []string
-	timeline *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec
-	request  string
+	name       string
+	metrics    []string
+	dimensions []string
+	timeline   *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec
+	request    string
 }
 
 var startupMetrics = []string{
@@ -393,6 +396,7 @@ func queryMetricSet(ctx context.Context, service interface{}, spec metricQuerySp
 	switch svc := service.(type) {
 	case *playdeveloperreporting.VitalsSlowstartrateService:
 		resp, err := svc.Query(spec.name, &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QuerySlowStartRateMetricSetRequest{
+			Dimensions:   spec.dimensions,
 			Metrics:      append([]string(nil), spec.metrics...),
 			TimelineSpec: spec.timeline,
 			UserCohort:   "OS_PUBLIC",
@@ -403,6 +407,7 @@ func queryMetricSet(ctx context.Context, service interface{}, spec metricQuerySp
 		return summarizeMetricSet(spec.name, resp.Rows), nil
 	case *playdeveloperreporting.VitalsSlowrenderingrateService:
 		resp, err := svc.Query(spec.name, &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QuerySlowRenderingRateMetricSetRequest{
+			Dimensions:   spec.dimensions,
 			Metrics:      append([]string(nil), spec.metrics...),
 			TimelineSpec: spec.timeline,
 			UserCohort:   "OS_PUBLIC",
@@ -413,6 +418,7 @@ func queryMetricSet(ctx context.Context, service interface{}, spec metricQuerySp
 		return summarizeMetricSet(spec.name, resp.Rows), nil
 	case *playdeveloperreporting.VitalsExcessivewakeuprateService:
 		resp, err := svc.Query(spec.name, &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryExcessiveWakeupRateMetricSetRequest{
+			Dimensions:   spec.dimensions,
 			Metrics:      append([]string(nil), spec.metrics...),
 			TimelineSpec: spec.timeline,
 			UserCohort:   "OS_PUBLIC",
@@ -423,6 +429,7 @@ func queryMetricSet(ctx context.Context, service interface{}, spec metricQuerySp
 		return summarizeMetricSet(spec.name, resp.Rows), nil
 	case *playdeveloperreporting.VitalsStuckbackgroundwakelockrateService:
 		resp, err := svc.Query(spec.name, &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryStuckBackgroundWakelockRateMetricSetRequest{
+			Dimensions:   spec.dimensions,
 			Metrics:      append([]string(nil), spec.metrics...),
 			TimelineSpec: spec.timeline,
 			UserCohort:   "OS_PUBLIC",
